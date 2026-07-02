@@ -8,6 +8,15 @@ CREATE TABLE IF NOT EXISTS stocks (
     market_cap bigint,
     shares_outstanding bigint,
     listed_at date,
+    close_price bigint,
+    change_rate numeric(8, 2),
+    revenue bigint,
+    operating_profit bigint,
+    net_income bigint,
+    per numeric(12, 2),
+    eps numeric(18, 2),
+    roe numeric(12, 2),
+    pbr numeric(12, 2),
     data_source varchar(20) NOT NULL DEFAULT 'SEED',
     synced_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -21,9 +30,18 @@ COMMENT ON COLUMN stocks.stock_name IS '종목명';
 COMMENT ON COLUMN stocks.market_type IS '시장구분(KOSPI/KOSDAQ)';
 COMMENT ON COLUMN stocks.sector IS '업종';
 COMMENT ON COLUMN stocks.listing_status IS '상장상태(LISTED/DELISTED/SUSPENDED)';
-COMMENT ON COLUMN stocks.market_cap IS '시가총액';
-COMMENT ON COLUMN stocks.shares_outstanding IS '상장주식수';
+COMMENT ON COLUMN stocks.market_cap IS '시가총액(억원, 키움 mac)';
+COMMENT ON COLUMN stocks.shares_outstanding IS '상장주식수(주, 키움 flo_stk)';
 COMMENT ON COLUMN stocks.listed_at IS '상장일';
+COMMENT ON COLUMN stocks.close_price IS '현재가/종가(원, 키움 cur_prc)';
+COMMENT ON COLUMN stocks.change_rate IS '등락률(%, 키움 flu_rt)';
+COMMENT ON COLUMN stocks.revenue IS '매출액(억원, 키움 sale_amt)';
+COMMENT ON COLUMN stocks.operating_profit IS '영업이익(억원, 키움 bus_pro)';
+COMMENT ON COLUMN stocks.net_income IS '당기순이익(억원, 키움 cup_nga)';
+COMMENT ON COLUMN stocks.per IS 'PER(키움 per)';
+COMMENT ON COLUMN stocks.eps IS 'EPS(키움 eps)';
+COMMENT ON COLUMN stocks.roe IS 'ROE(%, 키움 roe)';
+COMMENT ON COLUMN stocks.pbr IS 'PBR(키움 pbr)';
 COMMENT ON COLUMN stocks.data_source IS '데이터 출처(SEED/KIWOOM/BATCH)';
 COMMENT ON COLUMN stocks.synced_at IS '마지막 키움 동기화 시각';
 COMMENT ON COLUMN stocks.created_at IS '생성일시';
