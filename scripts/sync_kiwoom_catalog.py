@@ -4,7 +4,7 @@ Sync stock catalog enrichment fields from Kiwoom REST OpenAPI into PostgreSQL.
 
 This script intentionally lives outside stock-service. It updates only catalog
 fields that are currently missing from the seed data:
-  sector, market_cap, shares_outstanding, data_source, synced_at
+  sector_id, sector, market_cap, shares_outstanding, data_source, synced_at
 
 Required env:
   KIWOOM_APP_KEY
@@ -396,6 +396,21 @@ def ensure_schema(database_url: str, migration_file: str) -> None:
     print(f"Ensured stocks schema via {os.path.basename(migration_file)}", file=sys.stderr)
 
 
+def upsert_sector_names(cur: Any, rows: Iterable[StockCatalogRow], batch_size: int) -> None:
+    sector_names = sorted({row.sector.strip() for row in rows if row.sector and row.sector.strip()})
+    if not sector_names:
+        return
+
+    sql = """
+        INSERT INTO stock_sectors (sector_name)
+        VALUES (%s)
+        ON CONFLICT (sector_name) DO NOTHING
+    """
+    values = [(sector_name,) for sector_name in sector_names]
+    for index in range(0, len(values), batch_size):
+        cur.executemany(sql, values[index : index + batch_size])
+
+
 def fetch_synced_codes(database_url: str) -> set[str]:
     """Codes already enriched from Kiwoom (for --resume). Requires a real fundamental value."""
     _, db = load_db_module()
@@ -421,13 +436,19 @@ def upsert_rows(database_url: str, rows: Iterable[StockCatalogRow], dry_run: boo
     _, db = load_db_module()
 
     columns = (
-        "stock_code, stock_name, market_type, sector, market_cap, shares_outstanding, "
+        "stock_code, stock_name, market_type, sector, sector_id, market_cap, shares_outstanding, "
         "close_price, change_rate, revenue, operating_profit, net_income, per, eps, roe, pbr, "
         "listing_status, data_source, synced_at"
     )
-    placeholders = ", ".join(["%s"] * 15) + ", 'LISTED', 'KIWOOM', now()"
+    placeholders = (
+        "%s, %s, %s, %s, "
+        "(SELECT sector_id FROM stock_sectors WHERE sector_name = NULLIF(btrim(%s), '')), "
+        + ", ".join(["%s"] * 11)
+        + ", 'LISTED', 'KIWOOM', now()"
+    )
     fundamentals_update = """
             sector = COALESCE(EXCLUDED.sector, stocks.sector),
+            sector_id = COALESCE(EXCLUDED.sector_id, stocks.sector_id),
             market_cap = COALESCE(EXCLUDED.market_cap, stocks.market_cap),
             shares_outstanding = COALESCE(EXCLUDED.shares_outstanding, stocks.shares_outstanding),
             close_price = COALESCE(EXCLUDED.close_price, stocks.close_price),
@@ -465,7 +486,7 @@ def upsert_rows(database_url: str, rows: Iterable[StockCatalogRow], dry_run: boo
 
     def to_values(row: StockCatalogRow, market: str) -> tuple[Any, ...]:
         return (
-            row.code, row.name, market, row.sector, row.market_cap, row.shares_outstanding,
+            row.code, row.name, market, row.sector, row.sector, row.market_cap, row.shares_outstanding,
             row.close_price, row.change_rate, row.revenue, row.operating_profit, row.net_income,
             row.per, row.eps, row.roe, row.pbr,
         )
@@ -481,6 +502,7 @@ def upsert_rows(database_url: str, rows: Iterable[StockCatalogRow], dry_run: boo
 
     with db.connect(database_url) as conn:
         with conn.cursor() as cur:
+            upsert_sector_names(cur, materialized, batch_size)
             for sql, values in ((sql_with_market, with_market), (sql_without_market, without_market)):
                 for index in range(0, len(values), batch_size):
                     cur.executemany(sql, values[index : index + batch_size])

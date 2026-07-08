@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fill only stocks.sector from Kiwoom ka10099 stock list.
+Fill stocks.sector and stocks.sector_id from Kiwoom ka10099 stock list.
 
 Required env:
   KIWOOM_ACCESS_TOKEN
@@ -232,7 +232,7 @@ def load_db_module():
 
 def fetch_target_codes(database_url: str, include_existing: bool, limit: int | None) -> set[str]:
     db = load_db_module()
-    where = "" if include_existing else "WHERE sector IS NULL OR btrim(sector) = ''"
+    where = "" if include_existing else "WHERE sector_id IS NULL OR sector IS NULL OR btrim(sector) = ''"
     limit_sql = " LIMIT %s" if limit else ""
     sql = f"SELECT stock_code FROM stocks {where} ORDER BY stock_code{limit_sql}"
     params = (limit,) if limit else ()
@@ -243,17 +243,42 @@ def fetch_target_codes(database_url: str, include_existing: bool, limit: int | N
             return {clean_code(row[0]) for row in cur.fetchall()}
 
 
+def upsert_sector_names(cur: Any, items: list[StockSector], batch_size: int) -> None:
+    sector_names = sorted({item.sector.strip() for item in items if item.sector.strip()})
+    if not sector_names:
+        return
+
+    sql = """
+        INSERT INTO stock_sectors (sector_name)
+        VALUES (%s)
+        ON CONFLICT (sector_name) DO NOTHING
+    """
+    values = [(sector_name,) for sector_name in sector_names]
+    for index in range(0, len(values), batch_size):
+        cur.executemany(sql, values[index : index + batch_size])
+
+
 def update_sectors(database_url: str, items: list[StockSector], batch_size: int) -> int:
     if not items:
         return 0
 
     db = load_db_module()
-    sql = "UPDATE stocks SET sector = %s WHERE stock_code = %s"
-    values = [(item.sector, item.code) for item in items]
+    sql = """
+        UPDATE stocks
+        SET sector = %s,
+            sector_id = (
+                SELECT sector_id
+                FROM stock_sectors
+                WHERE sector_name = NULLIF(btrim(%s), '')
+            )
+        WHERE stock_code = %s
+    """
+    values = [(item.sector, item.sector, item.code) for item in items]
     updated = 0
 
     with db.connect(database_url) as conn:
         with conn.cursor() as cur:
+            upsert_sector_names(cur, items, batch_size)
             for index in range(0, len(values), batch_size):
                 batch = values[index : index + batch_size]
                 cur.executemany(sql, batch)
@@ -263,7 +288,7 @@ def update_sectors(database_url: str, items: list[StockSector], batch_size: int)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fill stocks.sector from Kiwoom ka10099 upName.")
+    parser = argparse.ArgumentParser(description="Fill stocks.sector and stocks.sector_id from Kiwoom ka10099 upName.")
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL))
     parser.add_argument("--base-url", default=os.getenv("KIWOOM_BASE_URL", DEFAULT_BASE_URL))
     parser.add_argument("--stock-list-path", default=os.getenv("KIWOOM_STOCK_LIST_PATH", DEFAULT_STOCK_LIST_PATH))
